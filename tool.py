@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_secret(key: str) -> str:
+    """Read from st.secrets (Streamlit Cloud) or os.environ (local)."""
     try:
         import streamlit as st
         val = st.secrets.get(key, "")
@@ -28,20 +29,24 @@ def _get_secret(key: str) -> str:
     return os.getenv(key, "")
 
 
-_tavily_key = _get_secret("TAVILY_API_KEY")
-if not _tavily_key:
-    raise EnvironmentError(
-        "TAVILY_API_KEY is not set. Add it to .env or Streamlit secrets."
-    )
-
-_tavily = TavilyClient(_tavily_key)
+def _get_tavily_client() -> TavilyClient:
+    """Create TavilyClient lazily so secrets are available at call time."""
+    key = _get_secret("TAVILY_API_KEY")
+    if not key:
+        raise EnvironmentError(
+            "TAVILY_API_KEY is not set.\n"
+            "Local: add it to your .env file.\n"
+            "Streamlit Cloud: add it in App Settings > Secrets."
+        )
+    return TavilyClient(key)
 
 
 @tool
 def web_search(query: str) -> str:
     """Search the web for information and return the top 5 results with snippets."""
     try:
-        result = _tavily.search(query=query, max_results=5)
+        tavily = _get_tavily_client()
+        result = tavily.search(query=query, max_results=5)
         out = []
         for r in result.get("results", []):
             out.append(
