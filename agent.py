@@ -4,13 +4,13 @@ from langchain_mistralai import ChatMistralAI
 import os
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from tools import web_search , scrape_url 
+from tools import web_search, scrape_url
 from dotenv import load_dotenv
 
 
 
 load_dotenv()
-llm = ChatMistralAI(model="codestral-2508", api_key=os.getenv("MISTRALAI_API_KEY"))
+llm = ChatMistralAI(model="ministral-3b-2512", api_key=os.getenv("MISTRALAI_API_KEY"))
 
 # 1st agent 
 def web_serch_agent():
@@ -79,3 +79,7 @@ One line verdict:
 c_chin = critic_prompt | llm | StrOutputParser()
 
 
+
+
+print(w_chin.invoke("The impact of AI on the world"))
+print(c_chin.invoke("The impact of AI on the world"))

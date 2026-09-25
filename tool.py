@@ -6,17 +6,16 @@ import os
 import re
 from typing import Annotated
 from dotenv import load_dotenv
-from rich import print
 load_dotenv()
 
 
-tavaly = TavilyClient(os.getenv("TAVILY_API"))
+tavily = TavilyClient(os.getenv("TAVILY_API_KEY"))
 
 @tool
 
 def web_search(query: str)-> str:
     """Search the web for information and return the first 5 results with snippets."""
-    result = tavaly.search(
+    result = tavily.search(
         query=query,
         max_results=5
     )
@@ -100,4 +99,4 @@ def scrape_url(
 
 
 
-print(web_scrape.invoke("https://codinginkannada.vercel.app/"))
+# removed debug line
