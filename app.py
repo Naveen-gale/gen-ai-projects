@@ -1,12 +1,15 @@
 ﻿import html
 import time
 import logging
+import os
 
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from agents import (
     build_search_agent, build_reader_agent,
-    writer_chain, critic_chain,
     invoke_search_agent, invoke_reader_agent,
     invoke_writer_chain, invoke_critic_chain,
 )
@@ -14,11 +17,11 @@ from agents import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-STEP_DELAY = 3   # seconds to wait between steps (avoids rate limits)
+STEP_DELAY = 4  # seconds between steps
 
 st.set_page_config(
     page_title="ResearchMind - AI Research Agent",
-    page_icon="🔬",
+    page_icon="magnifying_glass_tilted_right",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -87,10 +90,26 @@ for key in ("results", "running", "done", "error"):
     if key not in st.session_state:
         st.session_state[key] = {} if key == "results" else False
 
-st.markdown("""
+# Detect which LLM is active
+_google_key = os.getenv("GOOGLE_API_KEY", "")
+_mistral_key = os.getenv("MISTRALAI_API_KEY", "")
+if _google_key and _google_key != "your_google_api_key_here":
+    _llm_badge = "Google Gemini 1.5 Flash"
+    _llm_color = "#4285F4"
+elif _mistral_key:
+    _llm_badge = "Mistral open-mistral-nemo"
+    _llm_color = "#ff8c32"
+else:
+    _llm_badge = "No API key set"
+    _llm_color = "#ff4444"
+
+st.markdown(f"""
 <div class="hero">
   <h1>Research<span>Mind</span></h1>
   <p class="hero-sub">Four AI agents collaborate: search, scrape, write, critique.</p>
+  <p style="margin-top:0.8rem;font-size:0.78rem;font-family:'DM Mono',monospace;color:{_llm_color};">
+    LLM: {_llm_badge}
+  </p>
 </div>
 <div class="divider"></div>
 """, unsafe_allow_html=True)
@@ -100,7 +119,15 @@ col_input, _, col_pipeline = st.columns([5, 0.5, 4])
 with col_input:
     topic = st.text_input("Research Topic", placeholder="e.g. Quantum computing 2025", key="topic_input")
     run_btn = st.button("Run Research Pipeline", use_container_width=True)
-    st.caption("Note: Steps include a short delay to respect API rate limits.")
+
+    if _google_key == "your_google_api_key_here" or not _google_key:
+        st.warning(
+            "**Add a Google API key to remove rate limits.**\n\n"
+            "1. Go to https://aistudio.google.com/app/apikey\n"
+            "2. Click **Create API key** (free)\n"
+            "3. Paste it as `GOOGLE_API_KEY=...` in your `.env` file\n"
+            "4. Restart the app"
+        )
 
 with col_pipeline:
     st.markdown('<div class="section-heading">Pipeline</div>', unsafe_allow_html=True)
@@ -124,9 +151,18 @@ with col_pipeline:
     step_card("04", "Critic Chain",  _state("critic"), "Reviews & scores the report")
 
 if st.session_state.error:
-    st.error(f"An error occurred: {st.session_state.error}")
-    if "429" in str(st.session_state.error) or "rate" in str(st.session_state.error).lower():
-        st.info("Rate limit hit. The system retried automatically up to 5 times. Please wait 1-2 minutes then try again.")
+    err = str(st.session_state.error)
+    st.error(f"An error occurred: {err}")
+    if "429" in err or "rate" in err.lower() or "quota" in err.lower():
+        st.info(
+            "**Rate limit hit on Mistral free tier.**\n\n"
+            "Permanent fix: add a free Google Gemini API key to your `.env`:\n"
+            "1. Visit https://aistudio.google.com/app/apikey\n"
+            "2. Create a free key\n"
+            "3. Add `GOOGLE_API_KEY=your_key` to `.env`\n"
+            "4. Restart: `streamlit run app.py`\n\n"
+            "Gemini gives **15 req/min and 1M tokens/day** for free."
+        )
     st.session_state.error = False
 
 if run_btn:
@@ -143,24 +179,21 @@ if st.session_state.running and not st.session_state.done:
     results = {}
     topic_val = st.session_state.topic_input
     try:
-        # Step 1 - Search
-        with st.spinner("Search Agent is working... (retries automatically on rate limit)"):
+        with st.spinner("Step 1/4 - Search Agent working..."):
             sa = build_search_agent()
             sr = invoke_search_agent(sa, topic_val)
             results["search"] = sr["messages"][-1].content
             st.session_state.results = dict(results)
         time.sleep(STEP_DELAY)
 
-        # Step 2 - Reader
-        with st.spinner("Reader Agent is scraping... (retries automatically on rate limit)"):
+        with st.spinner("Step 2/4 - Reader Agent scraping..."):
             ra = build_reader_agent()
             rr = invoke_reader_agent(ra, topic_val, results["search"])
             results["reader"] = rr["messages"][-1].content
             st.session_state.results = dict(results)
         time.sleep(STEP_DELAY)
 
-        # Step 3 - Writer
-        with st.spinner("Writer is drafting the report... (retries automatically on rate limit)"):
+        with st.spinner("Step 3/4 - Writer drafting report..."):
             research_combined = (
                 f"SEARCH RESULTS:\n{results['search']}\n\n"
                 f"SCRAPED CONTENT:\n{results['reader']}"
@@ -169,8 +202,7 @@ if st.session_state.running and not st.session_state.done:
             st.session_state.results = dict(results)
         time.sleep(STEP_DELAY)
 
-        # Step 4 - Critic
-        with st.spinner("Critic is reviewing the report... (retries automatically on rate limit)"):
+        with st.spinner("Step 4/4 - Critic reviewing..."):
             results["critic"] = invoke_critic_chain(results["writer"])
             st.session_state.results = dict(results)
 

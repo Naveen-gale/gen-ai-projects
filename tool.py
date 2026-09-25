@@ -1,35 +1,58 @@
-from langchain.tools import tool 
+﻿"""
+tool.py  -  LangChain tools for ResearchMind
+Exports: web_search, scrape_url
+"""
+import os
+import re
+import logging
+
 import requests
 from bs4 import BeautifulSoup
 from tavily import TavilyClient
-import os 
-import re
 from typing import Annotated
+from langchain.tools import tool
 from dotenv import load_dotenv
+
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
-tavily = TavilyClient(os.getenv("TAVILY_API_KEY"))
+def _get_secret(key: str) -> str:
+    try:
+        import streamlit as st
+        val = st.secrets.get(key, "")
+        if val:
+            return val
+    except Exception:
+        pass
+    return os.getenv(key, "")
 
-@tool
 
-def web_search(query: str)-> str:
-    """Search the web for information and return the first 5 results with snippets."""
-    result = tavily.search(
-        query=query,
-        max_results=5
+_tavily_key = _get_secret("TAVILY_API_KEY")
+if not _tavily_key:
+    raise EnvironmentError(
+        "TAVILY_API_KEY is not set. Add it to .env or Streamlit secrets."
     )
 
+_tavily = TavilyClient(_tavily_key)
 
-    out = []
 
-    for r in result['results']:
-         out.append(
-            f"Title: {r['title']}\nURL: {r['url']}\nSnippet: {r['content'][:300]}\n"
-        )
-    
-
-    return "\n".join(out)
+@tool
+def web_search(query: str) -> str:
+    """Search the web for information and return the top 5 results with snippets."""
+    try:
+        result = _tavily.search(query=query, max_results=5)
+        out = []
+        for r in result.get("results", []):
+            out.append(
+                f"Title: {r['title']}\n"
+                f"URL: {r['url']}\n"
+                f"Snippet: {r['content'][:300]}\n"
+            )
+        return "\n".join(out) if out else "No results found."
+    except Exception as e:
+        logger.error("web_search error: %s", e)
+        return f"Search Error: {e}"
 
 
 @tool
@@ -45,29 +68,13 @@ def scrape_url(
         ),
         "Accept-Language": "en-US,en;q=0.9",
     }
-
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
-
-        # Parse HTML
         soup = BeautifulSoup(response.text, "html.parser")
-
-        # 1. Remove non-content and noisy elements
-        for element in soup([
-            "script",
-            "style",
-            "noscript",
-            "nav",
-            "footer",
-            "header",
-            "aside",
-            "svg",
-        ]):
-            element.decompose()
-
-        # 2. Prefer semantic content containers if available
-        main_content = (
+        for el in soup(["script", "style", "noscript", "nav", "footer", "header", "aside", "svg"]):
+            el.decompose()
+        main = (
             soup.find("main")
             or soup.find("article")
             or soup.find(id=re.compile(r"(content|main|article)", re.I))
@@ -75,28 +82,14 @@ def scrape_url(
             or soup.body
             or soup
         )
-
-        # 3. Extract text with separator to avoid merged words
-        raw_text = main_content.get_text(separator="\n", strip=True)
-
-        # 4. Collapse excessive whitespace and blank lines
-        clean_text = re.sub(r"\n\s*\n+", "\n\n", raw_text)
-
-        # 5. Cap output length to protect the LLM context window (e.g., ~12,000 chars)
-        max_chars = 12000
-        if len(clean_text) > max_chars:
-            clean_text = (
-                clean_text[:max_chars]
-                + "\n\n[Content truncated due to context length limits...]"
-            )
-
-        return clean_text.strip() or "Error: No readable text found on page."
-
+        raw = main.get_text(separator="\n", strip=True)
+        clean = re.sub(r"\n\s*\n+", "\n\n", raw)
+        if len(clean) > 12000:
+            clean = clean[:12000] + "\n\n[Content truncated...]"
+        return clean.strip() or "Error: No readable text found on page."
     except requests.exceptions.RequestException as e:
+        logger.error("scrape_url request error %s: %s", url, e)
         return f"Request Error: {e}"
     except Exception as e:
+        logger.error("scrape_url parse error %s: %s", url, e)
         return f"Parsing Error: {e}"
-
-
-
-# removed debug line
